@@ -1,0 +1,12 @@
+{
+  "env": {
+      "node": true
+  },
+  "extends": [
+    "airbnb",
+    "prettier"
+  ],
+  "rules": {
+    "no-console": "off"
+  }
+}
