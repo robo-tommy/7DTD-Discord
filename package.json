@@ -14,5 +14,10 @@
     "minimist": "^1.2.0",
     "semver-compare": "^1.0.0",
     "telnet-client": "^0.15.8"
+  },
+  "devDependencies": {
+    "eslint": "^6.6.0",
+    "eslint-config-airbnb-base": "^14.0.0",
+    "eslint-config-prettier": "^6.5.0"
   }
 }
