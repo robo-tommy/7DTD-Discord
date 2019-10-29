@@ -39,18 +39,19 @@ const argv = minimist(process.argv.slice(2), { string: ['channel', 'port'] });
 
 // This is a simple check to see if we're using arguments or the config file.
 // If the user is using arguments, config.json is ignored.
-
-let configFileTmp = Object.keys(argv).length > 2
+const configFile = (() => {
+  const configFileTmp = Object.keys(argv).length > 2
   ? undefined
-  : 1;
+  : true;
 
-if (typeof configFileTmp !== 'undefined') {
-  configFileTmp = typeof argv.configFile === 'undefined'
+  if (typeof configFileTmp === 'undefined') {
+    return undefined;
+  }
+
+  return typeof argv.configFile === 'undefined'
     ? './config.json'
     : argv.configFile;
-}
-
-const configFile = configFileTmp;
+})();
 
 const config = typeof configFile === 'undefined'
   ? argv
@@ -132,7 +133,7 @@ function handleMsgFromGame(line) {
   }
 
   // TODO: Extra checks to make sure other lines do not leak.
-  if (type !== 'INF' && type !== 'NET' && d7dtdState.waitingForMsg) {
+  if (!['INF', 'NET'].includes(type) && d7dtdState.waitingForMsg) {
     d7dtdState.waitingForMsg = 0;
     type = 'Chat'; // Manual override of type
 
@@ -148,11 +149,10 @@ function handleMsgFromGame(line) {
   }
 
   // Cut off the timestamp and other info
-  let msg = split[4];
-  const l = split.length - 1;
-  for (let i = 5; i <= l; i += 1) {
-    msg = `${msg} ${split[i]}`;
-  }
+  let msg = '';
+  split.slice(4).forEach((v) => {
+    msg += ` ${v}`;
+  })
 
   // Replace the source information
   if (type === 'Chat') {
@@ -167,9 +167,7 @@ function handleMsgFromGame(line) {
 
     msg = msg.replace(/ *\([^)]*\): */, '');
 
-    const checkString = "'Global'):";
-
-    if (split[10] !== checkString && split[11] !== checkString) {
+    if (![split[10], split[11]].includes("'Global'):")) {
       if (config['show-private-chat']) {
         msg = `*(Private)* ${msg}`;
       } else {
@@ -182,29 +180,24 @@ function handleMsgFromGame(line) {
     console.log(msg);
   }
 
-  // When using a local connection, messages go through as new data rather than a response.
-  // This string check is a workaround for that.
-  if (msg.startsWith("'Server': [")) {
-    return;
-  }
-
   // Convert it to Discord-friendly text.
   msg = msg.replace("'", '').replace("'", '').replace('\n', '');
 
-  if (type === 'GMSG') {
-    // Remove join and leave messages.
-    if (msg.endsWith('the game') && config['disable-join-leave-gmsgs']) {
-      return;
-    }
-
-    // Remove other global messages (player deaths, etc.)
-    if (!msg.endsWith('the game') && config['disable-misc-gmsgs']) {
-      return;
-    }
-  }
-
-  if (!config['hide-prefix'] && msg.includes(': /')) {
+  if (
+    // When using a local connection, messages go through as new data rather than a response.
+    // This string check is a workaround for that.
+    msg.startsWith('Server: [')
+    || (
+      type === 'GMSG' && (
+        // Remove join and leave messages.
+        (msg.endsWith('the game') && config['disable-join-leave-gmsgs'])
+        // Remove other global messages (player deaths, etc.)
+        || (!msg.endsWith('the game') && config['disable-misc-gmsgs'])
+      )
+    )
     // Do nothing if the prefix "/" is in the message.
+    || (!config['hide-prefix'] && msg.includes(': /'))
+  ) {
     return;
   }
 
@@ -220,14 +213,12 @@ function handleMsgToGame(line) {
   Telnet.exec(`say "${line}"`, (err, response) => {
     if (err) {
       console.log(`Error while attempting to send message: ${err.message}`);
-    } else {
-      const lines = response.split('\n');
-      const l = lines.length - 1
-
-      for (let i = 0; i <= l; i += 1) {
-        handleMsgFromGame(lines[i]);
-      }
+      return;
     }
+
+    response.split('\n').forEach((v) => {
+      handleMsgFromGame(v);
+    });
   });
 }
 
@@ -236,20 +227,29 @@ function handleCmdError(err) {
     return;
   }
 
-  if (err.message === 'response not received') {
-    channel.send('Command failed because the server is not responding. It may be frozen or loading.');
-  } else if (err.message === 'socket not writable') {
-    channel.send('Command failed because the bot is not connected to the server. Type 7d!info to see the current status.');
-  } else {
-    channel.send(`Command failed with error "${err.message}"`);
+  let msg = '';
+
+  switch (err.message) {
+    case 'response not received':
+      msg = 'Command failed because the server is not responding. It may be frozen or loading.';
+      break;
+
+    case 'socket not writable':
+      msg = 'Command failed because the bot is not connected to the server. Type 7d!info to see the current status.';
+      break;
+
+    default:
+      msg = `Command failed with error "${err.message}"`;
   }
+
+  channel.send(msg);
 }
 
 function handleTime(line, msg) {
   const day = line.split(',')[0].replace('Day ', '');
   const dayHorde = (parseInt(day / 7, 10) + 1) * 7 - day;
 
-  msg.channel.send(`${line}\n${dayHorde} day${dayHorde===1 ? '' : 's'} to next horde.`);
+  msg.channel.send(`${line}\n${dayHorde} day${dayHorde === 1 ? '' : 's'} to next horde.`);
 }
 
 function handlePlayerCount(line, msg) {
@@ -266,20 +266,28 @@ function updateDiscordStatus(status) {
     return;
   }
 
-  if (status === 0 && d7dtdState.connStatus !== 0) {
-    client.user.setActivity(`Connecting... | Type ${prefix}info`);
-    client.user.setStatus('dnd');
-  } else if (status === -1 && d7dtdState.connStatus !== -1) {
-    client.user.setActivity(`Error | Type ${prefix}help`);
-    client.user.setStatus('dnd');
-  } else if (status === 1 && d7dtdState.connStatus !== 1) {
-    if (typeof config.channel === 'undefined' || config.channel === 'channelid') {
-      client.user.setActivity(`No channel | Type ${prefix}setchannel`);
-      client.user.setStatus('idle');
-    } else {
-      client.user.setActivity(`7DTD | Type ${prefix}help`);
-      client.user.setStatus('online');
-    }
+  switch (true) {
+    case (status === 0 && d7dtdState.connStatus !== 0):
+      client.user.setActivity(`Connecting... | Type ${prefix}info`);
+      client.user.setStatus('dnd');
+      break;
+
+    case (status === -1 && d7dtdState.connStatus !== -1):
+      client.user.setActivity(`Error | Type ${prefix}help`);
+      client.user.setStatus('dnd');
+      break;
+
+    case (status === 1 && d7dtdState.connStatus !== 1):
+      if (typeof config.channel === 'undefined' || config.channel === 'channelid') {
+        client.user.setActivity(`No channel | Type ${prefix}setchannel`);
+        client.user.setStatus('idle');
+      } else {
+        client.user.setActivity(`7DTD | Type ${prefix}help`);
+        client.user.setStatus('online');
+      }
+      break;
+
+    default:
   }
 
   // Update the status so we don't keep sending duplicates to Discord
@@ -312,11 +320,9 @@ function processTelnetResponse(response, callback) {
 
   d7dtdState.receivedData = 0;
 
-  const lines = response.split('\n');
-  const l = lines.length - 1;
-  for (let i = 0; i <= l; i += 1) {
-    callback(lines[i]);
-  }
+  response.split('\n').forEach((v) => {
+    callback(v);
+  });
 }
 
 function parseDiscordCommand(msg, mentioned) {
@@ -328,7 +334,13 @@ function parseDiscordCommand(msg, mentioned) {
 
   // 7d!setchannel
   if (cmd.startsWith('SETCHANNEL')) {
-    if (msg.channel.type === 'text' && channel !== null ? (msg.member.permissions.has('MANAGE_GUILD') && msg.guild === channel.guild) : 1) {
+    if (
+      msg.channel.type === 'text'
+      && (
+        channel === null
+        || (msg.member.permissions.has('MANAGE_GUILD') && msg.guild === channel.guild)
+      )
+    ) {
       console.log(`User ${msg.author.tag} (${msg.author.id}) executed command: ${cmd}`);
       const str = msg.toString().toUpperCase().replace(`${prefix}SETCHANNEL `, '');
       const id = str.replace('<#', '').replace('>', '');
@@ -338,7 +350,11 @@ function parseDiscordCommand(msg, mentioned) {
         ? msg.channel
         : client.channels.find((obj) => (obj.id === id));
 
-      if (channel !== null && channelobj.id === channel.id && typeof d7dtdState.setChannelError === 'undefined') {
+      if (
+        channel !== null
+        && channelobj.id === channel.id
+        && typeof d7dtdState.setChannelError === 'undefined'
+      ) {
         msg.channel.send(":warning: This channel is already set as the bot's active channel!");
         return;
       }
@@ -354,10 +370,11 @@ function parseDiscordCommand(msg, mentioned) {
             console.error(`Failed to write to the config file with the following err:\n${err}\nMake sure your config file is not read-only or missing`);
             msg.channel.send(`:warning: Channel set successfully to <#${channelobj.id}> (${channelobj.id}), however the configuration has failed to save. The configured channel will not save when the bot restarts. See the bot's console for more info.`);
             d7dtdState.setChannelError = err;
-          } else {
-            d7dtdState.setChannelError = undefined;
-            msg.channel.send(`:white_check_mark: The channel has been successfully set to <#${channelobj.id}> (${channelobj.id})`);
+            return;
           }
+
+          d7dtdState.setChannelError = undefined;
+          msg.channel.send(`:white_check_mark: The channel has been successfully set to <#${channelobj.id}> (${channelobj.id})`);
         });
 
         refreshDiscordStatus();
@@ -372,7 +389,11 @@ function parseDiscordCommand(msg, mentioned) {
   // 7d!exec
   // This command must be explicitly enabled due to the security risks of allowing it.
   if (config['allow-exec-command'] === true && cmd.startsWith('EXEC')) {
-    if (msg.channel.type === 'text' && msg.member.permissions.has('MANAGE_GUILD') && msg.guild === channel.guild) {
+    if (
+      msg.channel.type === 'text'
+      && msg.member.permissions.has('MANAGE_GUILD')
+      && msg.guild === channel.guild
+    ) {
       console.log(`User ${msg.author.tag} (${msg.author.id}) executed command: ${cmd}`);
       const execStr = msg.toString().replace(new RegExp(`${prefix}EXEC`, 'ig'), '');
       Telnet.exec(execStr);
@@ -387,7 +408,7 @@ function parseDiscordCommand(msg, mentioned) {
   }
 
   // 7d!info
-  if (cmd === 'INFO' || cmd === 'I' || cmd === 'HELP' || cmd === 'H' || mentioned) {
+  if (['INFO', 'I', 'HELP', 'H'].includes(cmd) || mentioned) {
     // -1 = Error, 0 = No connection/connecting, 1 = Online, -100 = Override or N/A (value is ignored)
     let statusMsg;
     switch(d7dtdState.connStatus) {
@@ -412,9 +433,12 @@ function parseDiscordCommand(msg, mentioned) {
 
 
     const string = `Server connection: ${statusMsg}${cmdString}\n\n*7DTD-Discord v${pjson.version} - http://lakeys.net/discord7dtd - Powered by discord.js ${pjson.dependencies['discord.js'].replace('^', '')}.*`;
-    msg.channel.send({embed: {
-      description: string
-    }})
+    msg.channel
+      .send({
+        embed: {
+          description: string
+        }
+      })
       .catch(() => {
         // If the embed fails, try sending without it.
         msg.channel.send(string);
@@ -428,7 +452,7 @@ function parseDiscordCommand(msg, mentioned) {
   }
 
   // 7d!time
-  if (cmd === 'TIME' || cmd === 'T' || cmd === 'DAY') {
+  if (['TIME', 'T', 'DAY'].includes(cmd)) {
     Telnet.exec('gettime', (err, response) => {
       if (err) {
         handleCmdError(err);
@@ -450,7 +474,7 @@ function parseDiscordCommand(msg, mentioned) {
   }
 
   // 7d!version
-  if (cmd === 'VERSION' || cmd === 'V') {
+  if (['VERSION', 'V'].includes(cmd)) {
     Telnet.exec('version', (err, response) => {
       if (err) {
         handleCmdError(err);
@@ -471,7 +495,7 @@ function parseDiscordCommand(msg, mentioned) {
   }
 
   // 7d!players
-  if (cmd === 'PLAYERS' || cmd === 'P' || cmd === 'PL' || cmd === 'LP') {
+  if (['PLAYERS', 'P', 'PL','LP'].includes(cmd)) {
     Telnet.exec('lp', (err, response) => {
       if (err) {
         handleCmdError(err);
@@ -490,7 +514,7 @@ function parseDiscordCommand(msg, mentioned) {
       }
     });
   }
-  /*
+/*
   if (cmd === 'PREF') {
    Telnet.exec('getgamepref', (err, response) => {
      if (err) {
@@ -502,17 +526,15 @@ function parseDiscordCommand(msg, mentioned) {
        if (typeof response !== 'undefined') {
          d7dtdState.receivedData = 0;
 
-         const lines = response.split('\n');
-         const l = lines.length - 1;
-
          let final = '';
-         for (let i = 0; i <= l; i += 1) {
-           const line = lines[i];
-           if (line.startsWith('GamePref.')) {
-             final = `${final}\n${line.replace('GamePref.', '')}`;
+
+         response.split('\n').forEach((v) => {
+           if (v.startsWith('GamePref.')) {
+             final += `\n${v.replace('GamePref.', '')}`;
              d7dtdState.receivedData = 1;
            }
-         }
+         });
+
          msg.author.send(final);
          msg.channel.send('Server configuration has been sent to you via DM.');
          // TODO: Make sure user can receive DMs before sending
@@ -525,7 +547,7 @@ function parseDiscordCommand(msg, mentioned) {
      }
    });
   }
-  */
+*/
 }
 
 // /// # Telnet # /// //
@@ -589,15 +611,10 @@ Telnet.on('data', (data) => {
   if (dataStr === 'Please enter password:\r\n\u0000\u0000') {
     console.log('ERROR: Received password prompt!');
     process.exit();
-  }
-
-  if (dataStr === 'Password incorrect, please enter password:\r\n') {
+  } else if (dataStr === 'Password incorrect, please enter password:\r\n') {
     console.log('ERROR: Received password prompt! (Telnet password is incorrect)');
     process.exit();
   }
-
-  const lines = dataStr.split('\n');
-  const l = lines.length - 1;
 
   const resendOnError = () => {
   // Try re-sending without the embed if an error occurs.
@@ -607,13 +624,8 @@ Telnet.on('data', (data) => {
       });
   };
 
-  for (let i = 0; i <= l; i += 1) {
-    const line = lines[i];
-
-    // escapeRegExp
-    lines[i] = lines[i].replace(/[.*+?^${}()|[\]\\]/g, ' ');
-
-    const split = line.split(' ');
+  dataStr.split('\n').forEach((v) => {
+    const split = v.replace(/[.*+?^${}()|[\]\\]/g, ' ').split(' ');
 
     if (split[2] === 'INF' && split[3] === '[NET]' && split[4] === 'ServerShutdown\r') {
       // If we don't destroy the connection, crashes will happen when someone types a message.
@@ -629,18 +641,27 @@ Telnet.on('data', (data) => {
     }
 
     // This is a workaround for responses not working properly, particularly on local connections.
-    if (d7dtdState.waitingForTime && line.startsWith('Day')) {
-      handleTime(line, d7dtdState.waitingForTimeMsg);
-    } else if (d7dtdState.waitingForVersion && line.startsWith('Game version:')) {
-      d7dtdState.waitingForVersionMsg.channel.send(line);
-    } else if (d7dtdState.waitingForPlayers && line.startsWith('Total of ')) {
-      d7dtdState.waitingForPlayersMsg.channel.send(line);
-    // } else if (d7dtdState.waitingForPref && line.startsWith('GamePref.')) {
-    //  d7dtdState.waitingForPrefMsg.channel.send(line);
-    } else {
-      handleMsgFromGame(line);
+    switch (true) {
+      case (d7dtdState.waitingForTime && v.startsWith('Day')):
+        handleTime(v, d7dtdState.waitingForTimeMsg);
+        break;
+
+      case (d7dtdState.waitingForVersion && v.startsWith('Game version:')):
+        d7dtdState.waitingForVersionMsg.channel.send(v);
+        break;
+
+      case (d7dtdState.waitingForPlayers && v.startsWith('Total of ')):
+        d7dtdState.waitingForPlayersMsg.channel.send(v);
+        break;
+/*
+      case (d7dtdState.waitingForPref && v.startsWith('GamePref.')):
+        d7dtdState.waitingForPrefMsg.channel.send(v);
+        break;
+*/
+      default:
+        handleMsgFromGame(v);
     }
-  }
+  });
 });
 
 Telnet.on('error', (error) => {
@@ -672,9 +693,7 @@ if (!config['skip-discord-auth']) {
 
     if (client.guilds.size === 0) {
       console.log(`\x1b[31m********\nWARNING: The bot is currently not in a Discord server. You can invite it to a guild using this invite link:\nhttps://discordapp.com/oauth2/authorize?client_id=${client.user.id}&scope=bot\n********\x1b[0m`);
-    }
-
-    if (client.guilds.size > 1) {
+    } else if (client.guilds.size > 1) {
       console.log(`\x1b[31m********\nWARNING: The bot is currently in more than one guild. Please type 'leaveguilds' in the console to clear the bot from all guilds.\nIt is highly recommended that you verify 'Public bot' is UNCHECKED on this page:\n\x1b[1m https://discordapp.com/developers/applications/me/${client.user.id} \x1b[0m\n\x1b[31m********\x1b[0m`);
     }
 
@@ -740,23 +759,32 @@ if (!config['skip-discord-auth']) {
 
 // /// # Console Input # /// //
 process.stdin.on('data', (text) => {
-  if (text.toString() === 'stop\r\n' || text.toString() === 'exit\r\n' || text.toString() === 'stop\n' || text.toString() === 'exit\n') {
-    process.exit();
-  } else if (text.toString() === 'help\r\n' || text.toString() === 'help\n') {
-    console.log('This is the console for the Discord bot. It currently only accepts JavaScript commands for advanced users. Type "exit" to shut it down.');
-  } else if (text.toString() === 'leaveguilds\r\n' || text.toString() === 'leaveguilds\n') {
-    client.guilds.forEach((guild) => {
-      console.log(`Leaving guild "${guild.name}"`);
-      guild.leave();
-    });
-    console.log(`Left all guilds. Use this link to re-invite the bot: \n\x1b[1m https://discordapp.com/oauth2/authorize?client_id=${client.user.id}&scope=bot \x1b[0m`);
-  } else {
-    try {
-      // eslint-disable-next-line no-eval
-      eval(text.toString());
-    } catch (err) {
-      console.log(err);
-    }
+  const txt = text.toString();
+
+  switch (true) {
+    case (['stop\r\n', 'exit\r\n', 'stop\n', 'exit\n'].includes(txt)):
+      process.exit();
+      break;
+
+    case (['help\r\n', 'help\n'].includes(txt)):
+      console.log('This is the console for the Discord bot. It currently only accepts JavaScript commands for advanced users. Type "exit" to shut it down.');
+      break;
+
+    case (['leaveguilds\r\n', 'leaveguilds\n'].includes(txt)):
+      client.guilds.forEach((guild) => {
+        console.log(`Leaving guild "${guild.name}"`);
+        guild.leave();
+      });
+      console.log(`Left all guilds. Use this link to re-invite the bot: \n\x1b[1m https://discordapp.com/oauth2/authorize?client_id=${client.user.id}&scope=bot \x1b[0m`);
+      break;
+
+    default:
+      try {
+        // eslint-disable-next-line no-eval
+        eval(text.toString());
+      } catch (err) {
+        console.log(err);
+      }
   }
 });
 
