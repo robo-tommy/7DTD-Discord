@@ -3,7 +3,7 @@
       "node": true
   },
   "extends": [
-    "airbnb",
+    "airbnb-base",
     "prettier"
   ],
   "rules": {
