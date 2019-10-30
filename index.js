@@ -1,4 +1,7 @@
 // /// # Requirements and Initialization # /// //
+const isUndefined = require('lodash/isUndefined');
+const isString = require('lodash/isString');
+
 
 // eslint-disable-next-line import/order
 const pjson = require('./package.json');
@@ -44,21 +47,21 @@ const configFile = (() => {
   ? undefined
   : true;
 
-  if (typeof configFileTmp === 'undefined') {
+  if (isUndefined(configFileTmp)) {
     return undefined;
   }
 
-  return typeof argv.configFile === 'undefined'
+  return isUndefined(argv.configFile)
     ? './config.json'
     : argv.configFile;
 })();
 
-const config = typeof configFile === 'undefined'
+const config = isUndefined(configFile)
   ? argv
   // eslint-disable-next-line import/no-dynamic-require
   : require(configFile);
 
-if (typeof configFile === 'undefined') {
+if (isUndefined(configFile)) {
   console.log('********\nWARNING: Configuring the bot with arguments is no-longer supported and may not work correctly. Please consider using config.json instead.\nThe arguments must be removed from run.bat/run.sh in order for the config file to take effect.\n********');
 }
 
@@ -69,38 +72,38 @@ const Telnet = config['demo-mode']
 
 // IP
 // This argument allows you to run the bot on a remote network.
-const ip = typeof config.ip === 'undefined'
+const ip = isUndefined(config.ip)
   ? 'localhost'
   : config.ip;
 
 // Port
-const port = typeof config.port === 'undefined'
+const port = isUndefined(config.port)
   ? 8081
   : parseInt(config.port, 10);
 
 // Telnet Password
-if (typeof config.password === 'undefined') {
+if (isUndefined(config.password)) {
   console.error('\x1b[31mERROR: No telnet password specified!\x1b[0m');
   process.exit();
 }
 const pass = config.password;
 
 // Discord token
-if (typeof config.token === 'undefined') {
+if (isUndefined(config.token)) {
   console.error('\x1b[31mERROR: No Discord token specified!\x1b[0m');
   process.exit();
 }
 const { token } = config;
 
 // Discord channel
-const skipChannelCheck = (typeof config.channel === 'undefined' || config.channel === 'channelid');
+const skipChannelCheck = (isUndefined(config.channel) || config.channel === 'channelid');
 if (skipChannelCheck) {
   console.warn('\x1b[33mWARNING: No Discord channel specified! You will need to set one with "setchannel #channelname"\x1b[0m');
 }
 let channelid = config.channel.toString();
 
 // Prefix
-const prefix = typeof config.prefix === 'string'
+const prefix = isString(config.prefix)
   ? config.prefix.toUpperCase()
   : '7d!';
 
@@ -128,7 +131,7 @@ function handleMsgFromGame(line) {
   let split = line.split(' ');
   let type = split[3];
 
-  if (typeof type !== 'undefined') {
+  if (!isUndefined(type)) {
     type = type.replace(':', '');
   }
 
@@ -278,7 +281,7 @@ function updateDiscordStatus(status) {
       break;
 
     case (status === 1 && d7dtdState.connStatus !== 1):
-      if (typeof config.channel === 'undefined' || config.channel === 'channelid') {
+      if (isUndefined(config.channel) || config.channel === 'channelid') {
         client.user.setActivity(`No channel | Type ${prefix}setchannel`);
         client.user.setStatus('idle');
       } else {
@@ -314,7 +317,7 @@ function d7dtdHeartbeat() {
 function processTelnetResponse(response, callback) {
   // Sometimes the "response" has more than what we're looking for.
   // We have to double-check and make sure the correct line is returned.
-  if (typeof response === 'undefined') {
+  if (isUndefined(response)) {
     return;
   }
 
@@ -353,7 +356,7 @@ function parseDiscordCommand(msg, mentioned) {
       if (
         channel !== null
         && channelobj.id === channel.id
-        && typeof d7dtdState.setChannelError === 'undefined'
+        && isUndefined(d7dtdState.setChannelError)
       ) {
         msg.channel.send(":warning: This channel is already set as the bot's active channel!");
         return;
@@ -514,7 +517,7 @@ function parseDiscordCommand(msg, mentioned) {
       }
     });
   }
-/*
+  /*
   if (cmd === 'PREF') {
    Telnet.exec('getgamepref', (err, response) => {
      if (err) {
@@ -523,7 +526,7 @@ function parseDiscordCommand(msg, mentioned) {
        // const str = msg.toString().toUpperCase().replace(`${prefix}PREF `, '').replace(`${prefix}PREF`, '');
        // Sometimes the "response" has more than what we're looking for.
        // We have to double-check and make sure the correct line is returned.
-       if (typeof response !== 'undefined') {
+       if (!isUndefined(response)) {
          d7dtdState.receivedData = 0;
 
          let final = '';
@@ -547,7 +550,7 @@ function parseDiscordCommand(msg, mentioned) {
      }
    });
   }
-*/
+  */
 }
 
 // /// # Telnet # /// //
