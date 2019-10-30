@@ -1,18 +1,17 @@
 // /// # Requirements and Initialization # /// //
-const isUndefined = require('lodash/isUndefined');
-const isString = require('lodash/isString');
-
-
-// eslint-disable-next-line import/order
-const pjson = require('./package.json');
-
-console.log(`\x1b[7m# 7DTD Discord Integration v${pjson.version} #\x1b[0m`);
-console.log('NOTICE: Remote connections to 7 Days to Die servers are not encrypted. To keep your server secure, do not run this application on a public network, such as a public wi-fi hotspot. Be sure to use a unique telnet password.\n');
-
 const minimist = require('minimist');
 const fs = require('fs');
 
 const TelnetClient = require('telnet-client');
+const Discord = require('discord.js');
+
+const isUndefined = require('lodash/isUndefined');
+const isString = require('lodash/isString');
+
+const pjson = require('./package.json');
+
+console.log(`\x1b[7m# 7DTD Discord Integration v${pjson.version} #\x1b[0m`);
+console.log('NOTICE: Remote connections to 7 Days to Die servers are not encrypted. To keep your server secure, do not run this application on a public network, such as a public wi-fi hotspot. Be sure to use a unique telnet password.\n');
 
 let channel;
 
@@ -66,7 +65,6 @@ if (isUndefined(configFile)) {
 }
 
 const Telnet = config['demo-mode']
-  // eslint-disable-next-line import/order
   ? require('./lib/demoServer.js').client
   : new TelnetClient();
 
@@ -108,8 +106,6 @@ const prefix = isString(config.prefix)
   : '7d!';
 
 // Load the Discord client
-const Discord = require('discord.js');
-
 const client = new Discord.Client();
 
 // 7d!exec command
