@@ -97,6 +97,7 @@ const Telnet = config['demo-mode']
 const DiscordState = {
   channel: undefined,
   channelid: config.channel,
+  skipChannel: !config.channel || config.channel === 'channelid',
   firstLogin: false,
 };
 
@@ -127,6 +128,11 @@ const TelnetParams = {
 
 // ***** function definitions ***** //
 function handleMsgFromGame(line) {
+  // Make sure the channel exists.
+  if (!DiscordState.channel) {
+    return;
+  }
+
   let split = line.split(' ');
   let type = split[3];
 
@@ -142,10 +148,9 @@ function handleMsgFromGame(line) {
     split = D7dtdState.waitingForMsgData.concat(split);
   }
 
-  if (
-    (config['disable-chatmsgs'] && type === 'Chat')
-    || (config['disable-gmsgs'] && type === 'GMSG')
-    || DiscordState.channel === null
+  if (!['Chat', 'GMSG'].includes(type)
+    || (type === 'Chat' && config['disable-chatmsgs'])
+    || (type === 'GMSG' && config['disable-gmsgs'])
   ) {
     return;
   }
@@ -170,11 +175,11 @@ function handleMsgFromGame(line) {
     msg = msg.replace(/ *\([^)]*\): */, '');
 
     if (![split[10], split[11]].includes("'Global'):")) {
-      if (config['show-private-chat']) {
-        msg = `*(Private)* ${msg}`;
-      } else {
+      if (!config['show-private-chat']) {
         return;
       }
+
+      msg = `*(Private)* ${msg}`;
     }
   }
 
@@ -578,6 +583,10 @@ if (!config.token) {
   process.exit();
 }
 
+if(DiscordState.skipChannel) {
+  console.warn("\x1b[33mWARNING: No Discord channel specified! You will need to set one with 'setchannel #channelname'\x1b[0m");
+}
+
 // 7d!exec command
 if (config['allow-exec-command'] === true) {
   console.warn('\x1b[33mWARNING: Config option "allow-exec-command" is enabled. This may pose a security risk for your server.\x1b[0m');
@@ -719,7 +728,7 @@ if (!config['skip-discord-auth']) {
 
     DiscordState.channel = DiscordClient.channels.find((ch) => (ch.id === DiscordState.channelid));
 
-    if (!DiscordState.channel && !(isUndefined(config.channel) || config.channel === 'channelid')) {
+    if (!DiscordState.channel && !DiscordState.skipChannel) {
       console.log(`\x1b[33mERROR: Failed to identify channel with ID '${DiscordState.channelid}'\x1b[0m`);
     }
 
